@@ -103,6 +103,30 @@ public class PSQLminimal {
         return bao.toByteArray();
     }
 
+    protected static byte[] read(final InputStream inputStream, int timeout) throws IOException {
+        final ByteArrayOutputStream bao = new ByteArrayOutputStream();
+        Thread thread = new Thread(() -> {
+            do {
+                int read = 0;
+                try {
+                    read = inputStream.read();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                if (read == -1) {
+                    break;
+                }
+                bao.write(read);
+            } while (true);
+        });
+        thread.start();
+        try {
+            thread.join(timeout);
+        } catch (InterruptedException e) {
+        }
+        return bao.toByteArray();
+    }
+
     protected static byte[] readUntil(final InputStream inputStream, int eof) throws IOException {
         final ByteArrayOutputStream bao = new ByteArrayOutputStream();
 
@@ -135,6 +159,39 @@ public class PSQLminimal {
                 break;
             }
         }while (true);
+        return bao.toByteArray();
+    }
+
+    protected static byte[] readN(final InputStream inputStream, int maxLength, int timeout) throws IOException {
+        final ByteArrayOutputStream bao = new ByteArrayOutputStream();
+        Thread thread = new Thread(() -> {
+            int l = 0;
+            do
+            {
+                int read = 0;
+                try {
+                    read = inputStream.read();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                if(read == -1)
+                {
+                    break;
+                }
+                bao.write(read);
+                l++;
+                if(l >= maxLength)
+                {
+                    break;
+                }
+            }while (true);
+
+        });
+        thread.start();
+        try {
+            thread.join(timeout);
+        } catch (InterruptedException e) {
+        }
         return bao.toByteArray();
     }
 
@@ -328,7 +385,7 @@ public class PSQLminimal {
                             case 12: // SASL Final
                                 SCRAMhelper.verifyServerSignature(msgLen - 4 - 4);
                                 SCRAMhelper.close();
-                                break;
+                                return;
 
                             default:
                                 throw new RuntimeException(
@@ -382,10 +439,6 @@ public class PSQLminimal {
         write(out, intToBytes(encoded.length + 4 + 1), false);
         write(out, encoded, false);
         write(out, new byte[]{0}, true);
-        if(nativeSql.trim().startsWith("CREATE") || nativeSql.trim().startsWith("create") || nativeSql.trim().startsWith("DROP") || nativeSql.trim().startsWith("drop"))
-        {
-            return new ArrayList<>();
-        }
         return processResults(inputStream, columnLabels);
     }
 
@@ -414,21 +467,26 @@ public class PSQLminimal {
         // from there.
 
         while (!endQuery) {
-            c = readN(inputStream, 1)[0];
+            byte[] r = readN(inputStream, 1, 1000);
+            if(r.length == 0)
+            {
+                throw new RuntimeException("Timeout");
+            }
+            c = r[0];
             switch (c) {
 
                 case 5:
-                    readN(inputStream, 1);
+                case 0:
                     break;
 
                 case 'A': // Asynchronous Notify
-                    byte[] read = read(inputStream);
+                    byte[] read = read(inputStream, 100);
                     break;
 
                 case 't': { // ParameterDescription
                     int length = bytesToInt(readN(inputStream, Integer.BYTES));
 
-                    final byte[] bytes = readN(inputStream, length);
+                    final byte[] bytes = readN(inputStream, length, 100);
 
                     final String meta = new String(bytes, StandardCharsets.UTF_8);
 
@@ -437,7 +495,7 @@ public class PSQLminimal {
 
                 case 'n': // No Data (response to Describe)
                     int applied = bytesToInt(readN(inputStream, Integer.BYTES));
-
+                    byte[] read3 = read(inputStream, 100);
                     ArrayList<Object> objects = new ArrayList<>();
                     objects.add(applied);
                     resutSet.add(objects);
@@ -446,8 +504,8 @@ public class PSQLminimal {
                 case 's': { // Portal Suspended (end of Execute)
                     // nb: this appears *instead* of CommandStatus.
                     // Must be a SELECT if we suspended, so don't worry about it.
-                    byte[] read1 = readUntil(inputStream,0);
-                    return resutSet;
+                    byte[] read1 = read(inputStream,100);
+                    break;
                 }
 
                 case 'C': { // Command Status (end of Execute)
@@ -469,10 +527,7 @@ public class PSQLminimal {
                             ArrayList<Object> res = new ArrayList<>();
                             res.add(count.replace("Z","").trim());
                             resutSet.add(res);
-                            return resutSet;
                         }
-
-                        return resutSet;
                     }
                     break;
                 }
@@ -503,22 +558,22 @@ public class PSQLminimal {
                     // Error Response (response to pretty much everything; backend then skips until Sync)
                     int len = bytesToInt(readN(inputStream, Integer.BYTES));
                     final String msg = new String(readN(inputStream, len), StandardCharsets.ISO_8859_1);
-                    throw new RuntimeException("SQL-Error: " + msg.substring(1));
+                    //byte[] read2 = read(inputStream, 50);
+                    Logger.getLogger(PSQLminimal.class.getName()).log(Level.SEVERE, msg.substring(1));
+                    break;
 
                 case 'I': { // Empty Query (end of Execute)
-                    msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    byte[] read1 = readN(inputStream,msgSz);
                     return resutSet;
                 }
 
                 case 'N': // Notice Response
                     msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    byte[] read1 = readN(inputStream,msgSz);
+                    byte[] read1 = readN(inputStream,msgSz, 100);
                     break;
 
                 case 'S': // Parameter Status
                     msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    read1 = readN(inputStream,msgSz+1);
+                    read1 = readN(inputStream,msgSz, 100);
                     break;
 
                 case 'T': // Row Description (response to Describe)
@@ -542,7 +597,7 @@ public class PSQLminimal {
                     break;
 
                 default:
-                    byte[] reade = readUntil(inputStream,0);
+                    byte[] reade = read(inputStream,100);
                     throw new IOException("Unexpected packet type: " + c);
             }
 

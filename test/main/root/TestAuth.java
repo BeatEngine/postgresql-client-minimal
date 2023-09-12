@@ -14,11 +14,11 @@ import java.util.Map;
 
 public class TestAuth {
 
-    private final String cluster = "abc-def-7793";
-    private final String ip = cluster + ".7tc.ddd.net";
+    private final String cluster = "abz-dft-1234";
+    private final String ip = cluster + ".7tc.??.cloud";
 
     private final int port = 26257;
-    private final String password = "??????";
+    private final String password = "???????";
 
     @Test
     public void testAuth() throws IOException, SQLException {
@@ -45,8 +45,14 @@ public class TestAuth {
 
         PSQLminimal.doAuthentication(socket.getInputStream(), socket.getOutputStream(), ip, "app", password );
         final List<String> labels = new ArrayList<>();
-        List<List<Object>> lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
-        lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "CREATE TABLE test123test456test(id int, data VARCHAR(10));", labels);
+        List<List<Object>> lists;// = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
+        try {
+            lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "CREATE TABLE test123test456test(id int, data VARCHAR(10));", labels);
+        }
+        catch (final Exception e){
+            PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
+            throw new RuntimeException(e);
+        }
         Assert.assertTrue(lists.size() == 0);
         lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
         Assert.assertTrue(lists.size() == 0);
@@ -63,7 +69,13 @@ public class TestAuth {
 
         PSQLminimal.doAuthentication(socket.getInputStream(), socket.getOutputStream(), ip, "app", password );
         final List<String> labels = new ArrayList<>();
-        List<List<Object>> lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
+        List<List<Object>> lists;
+        try {
+            lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "DROP TABLE test123test456test;", labels);
+        }catch (final Exception e)
+        {
+            final int i = 0;
+        }
         lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "CREATE TABLE test123test456test(id int, data VARCHAR(10));", labels);
 
         lists = PSQLminimal.sendSimpleQuery(socket.getInputStream(), socket.getOutputStream(), "INSERT INTO test123test456test(id, data) VALUES (1, 'abc');", labels);

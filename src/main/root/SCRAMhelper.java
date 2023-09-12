@@ -154,25 +154,7 @@ public class SCRAMhelper {
     }
 
     public static void close() throws IOException {
-
-        int i = 0;
-        do {
-            byte[] read = PSQLminimal.readUntil(in, 0);
-            String s = new String(read, StandardCharsets.UTF_8);
-            if(read.length > 0)
-            {
-                i++;
-                if(s.contains("\f\n"))
-                {
-                    break;
-                }
-            }
-            else
-            {
-                i++;
-            }
-
-        }while (i < 1000);
-        PSQLminimal.readN(in, 1);
+        byte[] read = PSQLminimal.readUntil(in, 5);
+        byte[] bytes = PSQLminimal.readN(in, 1,100);
     }
 }
