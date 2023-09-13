@@ -458,6 +458,7 @@ public class PSQLminimal {
         List<List<Object>> resutSet = new ArrayList<>();
         List<Integer> castFields = new ArrayList<>();
         int c;
+        String error = null;
         boolean endQuery = false;
 
         // At the end of a command execution we have the CommandComplete
@@ -467,7 +468,7 @@ public class PSQLminimal {
         // from there.
 
         while (!endQuery) {
-            byte[] r = readN(inputStream, 1, 1000);
+            byte[] r = readN(inputStream, 1);
             if(r.length == 0)
             {
                 throw new RuntimeException("Timeout");
@@ -480,7 +481,16 @@ public class PSQLminimal {
                     break;
 
                 case 'A': // Asynchronous Notify
-                    byte[] read = read(inputStream, 100);
+                    int len = bytesToInt(readN(inputStream, Integer.BYTES));
+                    int pid = bytesToInt(readN(inputStream, Integer.BYTES));
+                    String msg = new String(readUntil(inputStream, 0));
+                    String param = new String(readUntil(inputStream, 0));
+                    break;
+
+                case '1': // Parse Complete (response to Parse)
+                case '2': // Bind Complete (response to Bind)
+                case '3': // Close Complete (response to Close)
+                    len = bytesToInt(readN(inputStream, Integer.BYTES));
                     break;
 
                 case 't': { // ParameterDescription
@@ -493,20 +503,11 @@ public class PSQLminimal {
                     break;
                 }
 
+                case 's': // Portal Suspended (end of Execute)
                 case 'n': // No Data (response to Describe)
                     int applied = bytesToInt(readN(inputStream, Integer.BYTES));
-                    byte[] read3 = read(inputStream, 100);
-                    ArrayList<Object> objects = new ArrayList<>();
-                    objects.add(applied);
-                    resutSet.add(objects);
-                    return resutSet;
-
-                case 's': { // Portal Suspended (end of Execute)
-                    // nb: this appears *instead* of CommandStatus.
-                    // Must be a SELECT if we suspended, so don't worry about it.
-                    byte[] read1 = read(inputStream,100);
                     break;
-                }
+
 
                 case 'C': { // Command Status (end of Execute)
                     // Handle status.
@@ -556,24 +557,26 @@ public class PSQLminimal {
 
                 case 'E':
                     // Error Response (response to pretty much everything; backend then skips until Sync)
-                    int len = bytesToInt(readN(inputStream, Integer.BYTES));
-                    final String msg = new String(readN(inputStream, len), StandardCharsets.ISO_8859_1);
+                    len = bytesToInt(readN(inputStream, Integer.BYTES));
+                    error = new String(readN(inputStream, len), StandardCharsets.ISO_8859_1);
                     //byte[] read2 = read(inputStream, 50);
-                    Logger.getLogger(PSQLminimal.class.getName()).log(Level.SEVERE, msg.substring(1));
+                    Logger.getLogger(PSQLminimal.class.getName()).log(Level.SEVERE, error.substring(1));
                     break;
 
                 case 'I': { // Empty Query (end of Execute)
+                    //read(inputStream, 10);
                     return resutSet;
                 }
 
                 case 'N': // Notice Response
                     msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    byte[] read1 = readN(inputStream,msgSz, 100);
+                    byte[] read1 = readN(inputStream,msgSz-4);
                     break;
 
                 case 'S': // Parameter Status
                     msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    read1 = readN(inputStream,msgSz, 100);
+                    byte[] readName = readUntil(inputStream,0);
+                    byte[] readValue = readUntil(inputStream,0);
                     break;
 
                 case 'T': // Row Description (response to Describe)
@@ -595,6 +598,19 @@ public class PSQLminimal {
                     }
                     labelsOut.addAll(labels);
                     break;
+
+                case 'Z': // Ready For Query (eventual response to Sync)
+                    bytesToInt(readN(inputStream, Integer.BYTES));
+                    break;
+
+                case 'G': // CopyInResponse
+                    throw new RuntimeException("Bulk transport (copy) not implemented!");
+                case 'H': // CopyOutResponse
+                    throw new RuntimeException("Bulk transport (copy) not implemented!");
+                case 'c': // CopyDone
+                    throw new RuntimeException("Bulk transport (copy) not implemented!");
+                case 'd': // CopyData
+                    throw new RuntimeException("Bulk transport (copy) not implemented!");
 
                 default:
                     byte[] reade = read(inputStream,100);

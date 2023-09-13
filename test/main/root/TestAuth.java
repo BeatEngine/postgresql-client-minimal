@@ -14,11 +14,11 @@ import java.util.Map;
 
 public class TestAuth {
 
-    private final String cluster = "abz-dft-1234";
-    private final String ip = cluster + ".7tc.??.cloud";
+    private final String cluster = "tailed-werebat-7793";
+    private final String ip = cluster + ".7tc.cockroachlabs.cloud";
 
     private final int port = 26257;
-    private final String password = "???????";
+    private final String password = "6f6FR67fs7fs7plK";
 
     @Test
     public void testAuth() throws IOException, SQLException {
