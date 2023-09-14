@@ -31,9 +31,9 @@ public class PSQLminimal {
 
 
 
-    public static Socket getSocket(final String host, int port) throws IOException {
+    public static LockSocket getSocket(final String host, int port) throws IOException {
 
-        Socket socketUnsafe = getSocketUnsafe(host, port);
+        LockSocket socketUnsafe = getSocketUnsafe(host, port);
         OutputStream outputStream = socketUnsafe.getOutputStream();
         write(outputStream, intToBytes(8), false);
         write(outputStream, shortToBytes((short) 1234), false);
@@ -44,19 +44,19 @@ public class PSQLminimal {
             case 'E':
                 // Server doesn't even know about the SSL handshake protocol
                 Logger.getLogger(PSQLminimal.class.getName()).log(Level.INFO, "TLS unknown using raw socket");
-                return socketUnsafe;
+                return new LockSocket(socketUnsafe.getSocket());
             case 'N':
 
                 // Server does not support ssl
                 Logger.getLogger(PSQLminimal.class.getName()).log(Level.INFO, "TLS not supported using raw socket");
-                return socketUnsafe;
+                return  new LockSocket(socketUnsafe.getSocket());
             case 'S':
 
                 // Server supports ssl
                 SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
                 SSLSocket newConnection;
                 try {
-                    newConnection = (SSLSocket) factory.createSocket(socketUnsafe,
+                    newConnection = (SSLSocket) factory.createSocket(socketUnsafe.getSocket(),
                             host, port, true);
                     // We must invoke manually, otherwise the exceptions are hidden
                     newConnection.setUseClientMode(true);
@@ -73,7 +73,7 @@ public class PSQLminimal {
                 // Perform the SSL handshake
                 sslSocket.startHandshake();*/
 
-                return newConnection;
+                return new LockSocket(newConnection);
 
             default:
                 throw new RuntimeException("An error occurred while setting up the SSL connection.");
@@ -81,9 +81,9 @@ public class PSQLminimal {
 
     }
 
-    public static Socket getSocketUnsafe(final String host, int port) throws IOException {
+    public static LockSocket getSocketUnsafe(final String host, int port) throws IOException {
 
-        Socket socket = new Socket(host, port);
+        LockSocket socket = new LockSocket(new Socket(host, port));
 
         return socket;
     }
@@ -316,7 +316,10 @@ public class PSQLminimal {
 
 
 
-    public static void doAuthentication(final InputStream pgStream, final OutputStream pgStreamOut, String host, String user, final String password) throws IOException, SQLException {
+    public static void doAuthentication(LockSocket socket, String host, String user, final String password) throws IOException, SQLException {
+        socket.lock();
+        final InputStream pgStream = socket.getInputStream();
+        final OutputStream pgStreamOut = socket.getOutputStream();
         // Now get the response from the backend, either an error message
         // or an authentication request
 
@@ -396,6 +399,7 @@ public class PSQLminimal {
 
                     case 0:
                     {
+                        socket.unLock();
                         return;
                     }
 
@@ -404,7 +408,7 @@ public class PSQLminimal {
                 }
             }
         } finally {
-
+            socket.unLock();
         }
         /*byte[] bytes;
         int c = 0;
@@ -426,20 +430,27 @@ public class PSQLminimal {
     }
 
     public static String getIp(String host, int port) throws IOException {
-        Socket socket = getSocket(host, port);
-        final String s = socket.getInetAddress().getHostAddress();
+        LockSocket socket = getSocket(host, port);
+        final String s = socket.getSocket().getInetAddress().getHostAddress();
         socket.close();
         return s;
     }
 
-    public static List<List<Object>> sendSimpleQuery(final InputStream inputStream, final OutputStream out, final String nativeSql, final List<String> columnLabels) throws IOException {
+    public static void close(final LockSocket s) throws IOException {
+        while (s.isLocked());
+        s.close();
+    }
+
+    public static List<List<Object>> sendSimpleQuery(final LockSocket s, final String nativeSql, final List<String> columnLabels) throws IOException {
+        s.lock();
+        final OutputStream out = s.getOutputStream();
 
         byte[] encoded = nativeSql.getBytes(StandardCharsets.UTF_8);
         write(out, new byte[]{'Q'}, false);
         write(out, intToBytes(encoded.length + 4 + 1), false);
         write(out, encoded, false);
         write(out, new byte[]{0}, true);
-        return processResults(inputStream, columnLabels);
+        return processResults(s, columnLabels,nativeSql.trim().startsWith("CREATE") || nativeSql.trim().startsWith("DROP"));
     }
 
     private static Object castType(final int type, final byte[] data)
@@ -454,7 +465,8 @@ public class PSQLminimal {
         }
     }
 
-    private static List<List<Object>> processResults(final InputStream inputStream, final List<String> labelsOut) throws IOException {
+    private static List<List<Object>> processResults(final LockSocket socket, final List<String> labelsOut, boolean ddl) throws IOException {
+        final InputStream inputStream = socket.getInputStream();
         List<List<Object>> resutSet = new ArrayList<>();
         List<Integer> castFields = new ArrayList<>();
         int c;
@@ -475,7 +487,7 @@ public class PSQLminimal {
                 throw new RuntimeException("Timeout");
             }
             c = r[0];
-            if(lastS && c != 'S' && c != 'E' && c != 'T' && c != 'D')
+            if(lastS && c != 'S' && c != 'E' && c != 'T' && c != 'D' && c != 'C' && !(ddl && c == 'I'))
             {
                 c = 0;
             }
@@ -536,7 +548,13 @@ public class PSQLminimal {
                             resutSet.add(res);
                         }
                     }
-                    lastS = false;
+                    if(ddl == false && (!s.startsWith("CREATE") && !s.startsWith("DROP"))) {
+                        lastS = false;
+                    }
+                    else
+                    {
+                        lastS = true;
+                    }
                     break;
                 }
 
@@ -574,6 +592,7 @@ public class PSQLminimal {
 
                 case 'I': { // Empty Query (end of Execute)
                     //read(inputStream, 10);
+                    socket.unLock();
                     return resutSet;
                 }
 
@@ -626,6 +645,7 @@ public class PSQLminimal {
 
                 default:
                     byte[] reade = read(inputStream,100);
+                    socket.unLock();
                     throw new IOException("Unexpected packet type: " + c);
             }
 
