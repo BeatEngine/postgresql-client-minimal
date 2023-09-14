@@ -460,6 +460,7 @@ public class PSQLminimal {
         int c;
         String error = null;
         boolean endQuery = false;
+        boolean lastS = false;
 
         // At the end of a command execution we have the CommandComplete
         // message to tell us we're done, but with a describeOnly command
@@ -474,6 +475,10 @@ public class PSQLminimal {
                 throw new RuntimeException("Timeout");
             }
             c = r[0];
+            if(lastS && c != 'S' && c != 'E' && c != 'T' && c != 'D')
+            {
+                c = 0;
+            }
             switch (c) {
 
                 case 5:
@@ -485,6 +490,7 @@ public class PSQLminimal {
                     int pid = bytesToInt(readN(inputStream, Integer.BYTES));
                     String msg = new String(readUntil(inputStream, 0));
                     String param = new String(readUntil(inputStream, 0));
+                    lastS = false;
                     break;
 
                 case '1': // Parse Complete (response to Parse)
@@ -499,7 +505,7 @@ public class PSQLminimal {
                     final byte[] bytes = readN(inputStream, length, 100);
 
                     final String meta = new String(bytes, StandardCharsets.UTF_8);
-
+                    lastS = false;
                     break;
                 }
 
@@ -530,6 +536,7 @@ public class PSQLminimal {
                             resutSet.add(res);
                         }
                     }
+                    lastS = false;
                     break;
                 }
 
@@ -553,6 +560,7 @@ public class PSQLminimal {
                         }
                     }
                     resutSet.add(row);
+                    lastS = false;
                     break;
 
                 case 'E':
@@ -561,6 +569,7 @@ public class PSQLminimal {
                     error = new String(readN(inputStream, len), StandardCharsets.ISO_8859_1);
                     //byte[] read2 = read(inputStream, 50);
                     Logger.getLogger(PSQLminimal.class.getName()).log(Level.SEVERE, error.substring(1));
+                    lastS = false;
                     break;
 
                 case 'I': { // Empty Query (end of Execute)
@@ -575,8 +584,9 @@ public class PSQLminimal {
 
                 case 'S': // Parameter Status
                     msgSz = bytesToInt(readN(inputStream, Integer.BYTES));
-                    byte[] readName = readUntil(inputStream,0);
-                    byte[] readValue = readUntil(inputStream,0);
+                    byte[] readName = readUntil(inputStream, 0);
+                    byte[] readValue = readUntil(inputStream, 0);
+                    lastS = true;
                     break;
 
                 case 'T': // Row Description (response to Describe)
@@ -597,10 +607,12 @@ public class PSQLminimal {
                         labels.add(columnLabel);
                     }
                     labelsOut.addAll(labels);
+                    lastS = false;
                     break;
 
                 case 'Z': // Ready For Query (eventual response to Sync)
                     bytesToInt(readN(inputStream, Integer.BYTES));
+                    lastS = false;
                     break;
 
                 case 'G': // CopyInResponse

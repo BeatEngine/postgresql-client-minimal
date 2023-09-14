@@ -154,7 +154,6 @@ public class SCRAMhelper {
     }
 
     public static void close() throws IOException {
-        byte[] read = PSQLminimal.readUntil(in, 5);
-        byte[] bytes = PSQLminimal.readN(in, 1,100);
+        byte[] read = PSQLminimal.readUntil(in, 8);
     }
 }
